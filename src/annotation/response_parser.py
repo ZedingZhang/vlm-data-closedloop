@@ -7,7 +7,7 @@ VLM 响应解析器
 
 import json
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from src.annotation.vlm_backends import VLMDetection, VLMResponse
 
@@ -44,7 +44,7 @@ class VLMResponseParser:
             task_type=task_type,
         )
 
-    def _extract_json(self, text: str) -> Optional[any]:
+    def _extract_json(self, text: str) -> Optional[Any]:
         """从文本中提取 JSON 内容"""
         # 尝试直接解析
         try:
