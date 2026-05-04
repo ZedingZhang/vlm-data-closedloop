@@ -88,10 +88,14 @@ def collect_images(input_dir: str) -> list[dict]:
 
 
 def run_annotation(config_path: str, input_dir: str = None,
-                   output_format: str = "both"):
-    """执行 VLM 自动标注管线"""
+                   output_format: str = "both", force: bool = False):
+    """执行 VLM 自动标注管线
+
+    Args:
+        force: 如果为 True，即使输出文件已存在也重新处理
+    """
     config = load_config(config_path)
-    log_dir = config.get("storage", {}).get("log_dir", "data/logs")
+    log_dir = config["storage"]["log_dir"]
     logger = setup_logger("annotation", log_dir)
 
     logger.info("=" * 60)
@@ -100,7 +104,7 @@ def run_annotation(config_path: str, input_dir: str = None,
 
     # 确定输入目录
     if input_dir is None:
-        input_dir = config.get("storage", {}).get("output_dir", "data/hard_examples")
+        input_dir = config["storage"]["output_dir"]
     logger.info(f"难例库路径: {os.path.abspath(input_dir)}")
 
     # 收集图像
@@ -108,7 +112,24 @@ def run_annotation(config_path: str, input_dir: str = None,
     if not entries:
         logger.warning("难例库中未找到图像，请先运行 run_pipeline.py 生成难例")
         return
-    logger.info(f"待标注图像: {len(entries)} 张")
+
+    # 断点续跑：收集已完成的图像名
+    processed = set()
+    annotation_output = os.path.join(os.path.dirname(input_dir), "annotations")
+    if not force:
+        if output_format in ("yolo", "both"):
+            prev_labels_dir = os.path.join(annotation_output, "yolo", "labels")
+            if os.path.isdir(prev_labels_dir):
+                for f in os.listdir(prev_labels_dir):
+                    if f.endswith(".txt"):
+                        processed.add(os.path.splitext(f)[0] + ".jpg")
+        logger.info(
+            f"断点续跑: 已完成 {len(processed)} 张, "
+            f"待处理 {len(entries)} 张"
+            if processed else f"待标注图像: {len(entries)} 张"
+        )
+    else:
+        logger.info(f"强制模式: 待标注图像 {len(entries)} 张")
 
     # 初始化组件
     vlm_backend = create_vlm_backend(config)
@@ -117,13 +138,12 @@ def run_annotation(config_path: str, input_dir: str = None,
     logger.info(f"可用 Prompt 模板: {prompt_factory.list_templates()}")
 
     # 标注类别（合并配置类别 + VLM 可能检测到的类别）
-    base_classes = config.get("inference", {}).get("classes", [])
+    base_classes = config["inference"]["classes"]
     extra_classes = ["dog", "cat", "bag", "phone", "wallet", "hand",
                      "obstruction", "sticker", "dirt"]
     all_classes = list(dict.fromkeys(base_classes + extra_classes))
 
     # 初始化格式转换器
-    annotation_output = os.path.join(os.path.dirname(input_dir), "annotations")
     yolo_converter = None
     coco_converter = None
 
@@ -144,9 +164,22 @@ def run_annotation(config_path: str, input_dir: str = None,
     total = len(entries)
     success = 0
     empty = 0
+    skipped = 0
     t_start = time.time()
 
     for idx, entry in enumerate(entries):
+        # 断点续跑：跳过已有输出的图像
+        if entry["image_name"] in processed and not force:
+            skipped += 1
+            if yolo_converter and coco_converter:
+                # COCO: 仍需将跳过项加入数据集
+                image = cv2.imread(entry["image_path"])
+                if image is not None:
+                    h, w = image.shape[:2]
+                    coco_converter.add_image(entry["image_name"], [], w, h)
+            if (idx + 1) % 50 == 0:
+                logger.info(f"[进度] {idx + 1}/{total} | 成功: {success} | 跳过: {skipped}")
+            continue
         img_path = entry["image_path"]
         image = cv2.imread(img_path)
         if image is None:
@@ -219,6 +252,7 @@ def run_annotation(config_path: str, input_dir: str = None,
     logger.info(f"总图像数: {total}")
     logger.info(f"成功标注: {success}")
     logger.info(f"空检测: {empty}")
+    logger.info(f"跳过(已完成): {skipped}")
     logger.info(f"耗时: {elapsed:.2f}s")
 
     if yolo_converter:
@@ -252,8 +286,12 @@ def main():
         choices=["yolo", "coco", "both"],
         help="输出格式"
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="强制重新处理所有图像（忽略已有输出）"
+    )
     args = parser.parse_args()
-    run_annotation(args.config, input_dir=args.input, output_format=args.format)
+    run_annotation(args.config, input_dir=args.input, output_format=args.format, force=args.force)
 
 
 if __name__ == "__main__":
