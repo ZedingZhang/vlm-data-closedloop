@@ -112,27 +112,24 @@ class UncertaintySampler:
                 continue
 
             # 计算相邻帧之间的 IoU
+            iou_values = []
             low_iou_count = 0
-            pair_count = 0
             for i in range(1, len(history)):
                 _, prev_box = history[i - 1]
                 _, curr_box = history[i]
                 iou = compute_iou(prev_box, curr_box)
-                pair_count += 1
+                iou_values.append(iou)
                 if iou < self.iou_threshold:
                     low_iou_count += 1
 
+            pair_count = len(iou_values)
             if pair_count == 0:
                 continue
 
             jitter_ratio = low_iou_count / pair_count
 
             if jitter_ratio >= self.jitter_ratio:
-                # 计算平均 IoU 作为不确定性分数的参考
-                avg_iou_values = []
-                for i in range(1, len(history)):
-                    avg_iou_values.append(compute_iou(history[i - 1][1], history[i][1]))
-                avg_iou = sum(avg_iou_values) / len(avg_iou_values) if avg_iou_values else 0
+                avg_iou = sum(iou_values) / pair_count
 
                 flags.append(UncertaintyFlag(
                     frame_id=result.frame_id,
