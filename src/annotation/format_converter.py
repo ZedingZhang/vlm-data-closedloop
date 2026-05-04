@@ -9,7 +9,8 @@
 import json
 import os
 from datetime import datetime
-from typing import Optional
+
+import yaml
 
 from src.annotation.vlm_backends import VLMDetection, VLMResponse
 
@@ -112,7 +113,6 @@ class YOLOFormatConverter:
             "nc": len(self.class_names),
         }
         yaml_path = os.path.join(self.output_dir, f"{dataset_name}.yaml")
-        import yaml
         with open(yaml_path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
         return yaml_path
