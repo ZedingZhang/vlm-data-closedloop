@@ -87,11 +87,6 @@ class SimulatedInferenceEngine(BaseInferenceEngine):
             conf_vector = [random.uniform(0.01, 0.15) for _ in self.classes]
             if class_idx >= 0:
                 conf_vector[class_idx] = noisy_conf
-            # 归一化
-            total = sum(conf_vector)
-            conf_vector = [c / total for c in conf_vector]
-            raw_confs.append(conf_vector)
-
             # 对检测框添加像素偏移噪声
             bbox = list(obj["bbox"])
             for i in range(4):
@@ -105,6 +100,16 @@ class SimulatedInferenceEngine(BaseInferenceEngine):
             # 随机 False Negative：小概率丢弃一个真实检测
             if random.random() < 0.05:
                 continue
+
+            # 生成该检测对应的完整类别置信度向量
+            class_idx = self.classes.index(obj["class"]) if obj["class"] in self.classes else -1
+            conf_vector = [random.uniform(0.01, 0.15) for _ in self.classes]
+            if class_idx >= 0:
+                conf_vector[class_idx] = noisy_conf
+            # 归一化
+            total = sum(conf_vector)
+            conf_vector = [c / total for c in conf_vector]
+            raw_confs.append(conf_vector)
 
             det = Detection(
                 class_name=obj["class"],
