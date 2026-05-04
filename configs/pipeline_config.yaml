@@ -1,0 +1,95 @@
+# ============================================================
+# VLM 数据闭环系统 - 管线配置
+# ============================================================
+
+# 视频推流模拟器配置
+simulator:
+  # 模拟视频分辨率
+  width: 640
+  height: 480
+  fps: 25
+  # 模拟总帧数（0 = 无限推流）
+  total_frames: 500
+  # 场景生成概率（长尾场景出现的概率）
+  longtail_prob: 0.15
+  # 长尾场景类型
+  longtail_scenes:
+    - pet_in_rear        # 后排宠物
+    - left_object        # 遗留物品
+    - extreme_lighting   # 奇异光照
+    - camera_occluded    # 摄像头被异物遮挡
+
+# 推理模型配置
+inference:
+  # 模型类型: "yolo" | "simulated"
+  model_type: "simulated"
+  # YOLOv8 模型权重路径（当 model_type=yolo 时生效）
+  yolo_weights: "yolov8n.pt"
+  # 置信度阈值
+  conf_threshold: 0.25
+  # 推理设备
+  device: "cpu"
+  # 分类类别
+  classes:
+    - driver
+    - passenger
+    - child_seat
+    - pet
+    - left_object
+    - phone_usage
+    - smoking
+    - seatbelt_off
+    - normal
+
+# 不确定性采样配置
+sampling:
+  # 分类置信度低于此阈值视为"不确定"
+  confidence_threshold: 0.4
+  # 检测框抖动阈值（连续帧之间 IoU 低于此值视为剧烈抖动）
+  bbox_jitter_iou_threshold: 0.5
+  # 用于抖动检测的滑动窗口大小（帧数）
+  jitter_window_size: 5
+  # 抖动判定：窗口内超过此比例的帧对 IoU 低于阈值则判定为抖动
+  jitter_ratio_threshold: 0.6
+  # 多条件融合策略: "any" | "all"
+  fusion_strategy: "any"
+
+# 难例库存储配置
+storage:
+  # 难例存储根目录
+  output_dir: "data/hard_examples"
+  # 日志目录
+  log_dir: "data/logs"
+  # 存储格式: "image" | "video_clip"
+  save_format: "image"
+  # 同时保存检测元数据
+  save_metadata: true
+  # 难例去重：同一目标连续 N 帧内只保存一次
+  dedup_interval: 10
+
+# VLM 自动标注配置
+vlm:
+  # 后端类型: "simulated" | "qwen" | "grounding_dino"
+  backend: "simulated"
+
+  # Qwen-VL-Chat 配置
+  qwen:
+    mode: "api"                              # "local" | "api"
+    api_base: "http://localhost:8000/v1"
+    model_name: "Qwen/Qwen2.5-VL-7B-Instruct"
+    max_tokens: 1024
+
+  # Grounding-DINO 配置
+  grounding_dino:
+    mode: "api"                              # "local" | "api"
+    api_url: "http://localhost:7860/api/predict"
+    model_path: "IDEA-Research/grounding-dino-base"
+    box_threshold: 0.25
+    text_threshold: 0.20
+
+# 标注输出配置
+annotation:
+  # 输出格式: "yolo" | "coco" | "both"
+  output_format: "both"
+  # 输出根目录
+  output_dir: "data/annotations"
