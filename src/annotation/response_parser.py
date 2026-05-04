@@ -159,27 +159,33 @@ class VLMResponseParser:
                 raw_text=m.group(0),
             ))
 
-        # 匹配 <box> 标签格式（Qwen-VL 常见）
-        box_pattern = r'<box>\s*\((\d+),\s*(\d+)\)\s*,\s*\((\d+),\s*(\d+)\)\s*</box>'
-        for m in re.finditer(box_pattern, text):
-            detections.append(VLMDetection(
-                class_name="object",
-                bbox=[int(m.group(1)), int(m.group(2)),
-                      int(m.group(3)), int(m.group(4))],
-                confidence=0.5,
-                raw_text=m.group(0),
-            ))
-
-        # 匹配 <ref>xxx</ref><box>(x1,y1),(x2,y2)</box> 格式
+        # 匹配 <ref>xxx</ref><box>(x1,y1),(x2,y2)</box> 格式（先于纯 <box> 匹配）
         ref_box_pattern = (
             r'<ref>\s*(.*?)\s*</ref>\s*'
             r'<box>\s*\((\d+),\s*(\d+)\)\s*,\s*\((\d+),\s*(\d+)\)\s*</box>'
         )
+        seen_positions = set()
         for m in re.finditer(ref_box_pattern, text):
+            key = (m.group(2), m.group(3), m.group(4), m.group(5))
+            seen_positions.add(key)
             detections.append(VLMDetection(
                 class_name=m.group(1),
                 bbox=[int(m.group(2)), int(m.group(3)),
                       int(m.group(4)), int(m.group(5))],
+                confidence=0.5,
+                raw_text=m.group(0),
+            ))
+
+        # 匹配 <box> 标签格式（跳过已被 <ref> 匹配的位置）
+        box_pattern = r'<box>\s*\((\d+),\s*(\d+)\)\s*,\s*\((\d+),\s*(\d+)\)\s*</box>'
+        for m in re.finditer(box_pattern, text):
+            key = (m.group(1), m.group(2), m.group(3), m.group(4))
+            if key in seen_positions:
+                continue
+            detections.append(VLMDetection(
+                class_name="object",
+                bbox=[int(m.group(1)), int(m.group(2)),
+                      int(m.group(3)), int(m.group(4))],
                 confidence=0.5,
                 raw_text=m.group(0),
             ))
