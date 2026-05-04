@@ -40,15 +40,13 @@ class CabinVideoSimulator:
     }
 
     def __init__(self, config: dict):
-        sim_cfg = config.get("simulator", {})
-        self.width = sim_cfg.get("width", 640)
-        self.height = sim_cfg.get("height", 480)
-        self.fps = sim_cfg.get("fps", 25)
-        self.total_frames = sim_cfg.get("total_frames", 500)
-        self.longtail_prob = sim_cfg.get("longtail_prob", 0.15)
-        self.longtail_scenes = sim_cfg.get("longtail_scenes", [
-            "pet_in_rear", "left_object", "extreme_lighting", "camera_occluded"
-        ])
+        sim_cfg = config["simulator"]
+        self.width = sim_cfg["width"]
+        self.height = sim_cfg["height"]
+        self.fps = sim_cfg["fps"]
+        self.total_frames = sim_cfg["total_frames"]
+        self.longtail_prob = sim_cfg["longtail_prob"]
+        self.longtail_scenes = sim_cfg["longtail_scenes"]
         self._frame_id = 0
 
     # ------------------------------------------------------------------

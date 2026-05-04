@@ -36,7 +36,7 @@ def run_pipeline(config_path: str, fast_mode: bool = False, visualize: bool = Fa
     """
     # 加载配置
     config = load_config(config_path)
-    log_dir = config.get("storage", {}).get("log_dir", "data/logs")
+    log_dir = config["storage"]["log_dir"]
     logger = setup_logger("pipeline", log_dir)
 
     logger.info("=" * 60)

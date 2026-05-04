@@ -20,6 +20,8 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from src.utils.helpers import DEFAULT_CONFIG
+
 logger = logging.getLogger(__name__)
 
 
@@ -213,13 +215,17 @@ class QwenVLBackend(VLMBackend):
     """
 
     def __init__(self, config: dict = None):
-        cfg = (config or {}).get("vlm", {}).get("qwen", {})
-        self.mode = cfg.get("mode", "api")           # "local" | "api"
-        self.api_base = cfg.get("api_base", "http://localhost:8000/v1")
-        self.model_name = cfg.get("model_name", "Qwen/Qwen2.5-VL-7B-Instruct")
-        self.max_tokens = cfg.get("max_tokens", 1024)
-        self.max_retries = cfg.get("max_retries", 3)
-        self.retry_delay = cfg.get("retry_delay", 2.0)
+        default = DEFAULT_CONFIG["vlm"]["qwen"]
+        if config and "vlm" in config and "qwen" in config["vlm"]:
+            cfg = config["vlm"]["qwen"]
+        else:
+            cfg = default
+        self.mode = cfg.get("mode", default["mode"])
+        self.api_base = cfg.get("api_base", default["api_base"])
+        self.model_name = cfg.get("model_name", default["model_name"])
+        self.max_tokens = cfg.get("max_tokens", default["max_tokens"])
+        self.max_retries = cfg.get("max_retries", default["max_retries"])
+        self.retry_delay = cfg.get("retry_delay", default["retry_delay"])
         self._model = None
         self._processor = None
 
@@ -365,14 +371,18 @@ class GroundingDINOBackend(VLMBackend):
     """
 
     def __init__(self, config: dict = None):
-        cfg = (config or {}).get("vlm", {}).get("grounding_dino", {})
-        self.mode = cfg.get("mode", "api")
-        self.api_url = cfg.get("api_url", "http://localhost:7860/api/predict")
-        self.model_path = cfg.get("model_path", "IDEA-Research/grounding-dino-base")
-        self.box_threshold = cfg.get("box_threshold", 0.25)
-        self.text_threshold = cfg.get("text_threshold", 0.20)
-        self.max_retries = cfg.get("max_retries", 3)
-        self.retry_delay = cfg.get("retry_delay", 2.0)
+        default = DEFAULT_CONFIG["vlm"]["grounding_dino"]
+        if config and "vlm" in config and "grounding_dino" in config["vlm"]:
+            cfg = config["vlm"]["grounding_dino"]
+        else:
+            cfg = default
+        self.mode = cfg.get("mode", default["mode"])
+        self.api_url = cfg.get("api_url", default["api_url"])
+        self.model_path = cfg.get("model_path", default["model_path"])
+        self.box_threshold = cfg.get("box_threshold", default["box_threshold"])
+        self.text_threshold = cfg.get("text_threshold", default["text_threshold"])
+        self.max_retries = cfg.get("max_retries", default["max_retries"])
+        self.retry_delay = cfg.get("retry_delay", default["retry_delay"])
         self._model = None
 
     def _build_text_prompt(self, prompt: dict) -> str:
@@ -509,8 +519,8 @@ class GroundingDINOBackend(VLMBackend):
 
 def create_vlm_backend(config: dict) -> VLMBackend:
     """工厂方法：根据配置创建 VLM 后端"""
-    vlm_cfg = config.get("vlm", {})
-    backend_type = vlm_cfg.get("backend", "simulated")
+    vlm_cfg = config.get("vlm", DEFAULT_CONFIG["vlm"])
+    backend_type = vlm_cfg.get("backend", DEFAULT_CONFIG["vlm"]["backend"])
 
     if backend_type == "qwen":
         return QwenVLBackend(config)
