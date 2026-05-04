@@ -35,9 +35,12 @@ class UncertaintySampler:
         self.window_size = samp_cfg.get("jitter_window_size", 5)
         self.jitter_ratio = samp_cfg.get("jitter_ratio_threshold", 0.6)
         self.fusion = samp_cfg.get("fusion_strategy", "any")
+        # 历史最大保留帧数：超过此范围未出现的类别将被清理
+        self.history_max_age = samp_cfg.get("history_max_age", 500)
 
         # 滑动窗口缓存：class_name -> deque of (frame_id, bbox)
         self._history: dict[str, list[tuple[int, list]]] = defaultdict(list)
+        self._last_prune_frame = 0
 
     # ------------------------------------------------------------------
     # 低置信度评估
@@ -73,6 +76,20 @@ class UncertaintySampler:
             # 保留窗口大小
             if len(history) > self.window_size:
                 history.pop(0)
+
+    def _prune_history(self, current_frame_id: int):
+        """清理长期未出现的类别记录，防止内存无限增长
+
+        每 history_max_age 帧执行一次，移除最近 history_max_age 帧内
+        没有新检测的类别条目。
+        """
+        stale = [
+            cls_name
+            for cls_name, entries in self._history.items()
+            if not entries or current_frame_id - entries[-1][0] > self.history_max_age
+        ]
+        for cls_name in stale:
+            del self._history[cls_name]
 
     def _check_bbox_jitter(self, result: InferenceResult) -> list[UncertaintyFlag]:
         """检查检测框在滑动窗口内是否发生剧烈抖动
@@ -147,6 +164,11 @@ class UncertaintySampler:
         """
         # 先更新历史，再做抖动检测
         self._update_history(result)
+
+        # 定期清理过期的历史记录（每 history_max_age 帧一次）
+        if result.frame_id - self._last_prune_frame >= self.history_max_age:
+            self._prune_history(result.frame_id)
+            self._last_prune_frame = result.frame_id
 
         conf_flags = self._check_low_confidence(result)
         jitter_flags = self._check_bbox_jitter(result)
