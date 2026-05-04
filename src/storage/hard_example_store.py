@@ -23,12 +23,12 @@ class HardExampleStorage:
     """难例库管理器"""
 
     def __init__(self, config: dict):
-        stor_cfg = config.get("storage", {})
-        self.output_dir = stor_cfg.get("output_dir", "data/hard_examples")
-        self.log_dir = stor_cfg.get("log_dir", "data/logs")
-        self.save_format = stor_cfg.get("save_format", "image")
-        self.save_metadata = stor_cfg.get("save_metadata", True)
-        self.dedup_interval = stor_cfg.get("dedup_interval", 10)
+        stor_cfg = config["storage"]
+        self.output_dir = stor_cfg["output_dir"]
+        self.log_dir = stor_cfg["log_dir"]
+        self.save_format = stor_cfg["save_format"]
+        self.save_metadata = stor_cfg["save_metadata"]
+        self.dedup_interval = stor_cfg["dedup_interval"]
 
         # 去重记录：(class_name, reason) -> 上次保存的 frame_id
         self._last_saved: dict[tuple[str, str], int] = {}

@@ -34,13 +34,10 @@ class BaseInferenceEngine:
     """推理引擎基类"""
 
     def __init__(self, config: dict):
-        inf_cfg = config.get("inference", {})
-        self.conf_threshold = inf_cfg.get("conf_threshold", 0.25)
-        self.classes = inf_cfg.get("classes", [
-            "driver", "passenger", "child_seat", "pet",
-            "left_object", "phone_usage", "smoking", "seatbelt_off", "normal"
-        ])
-        self.device = inf_cfg.get("device", "cpu")
+        inf_cfg = config["inference"]
+        self.conf_threshold = inf_cfg["conf_threshold"]
+        self.classes = inf_cfg["classes"]
+        self.device = inf_cfg["device"]
 
     def infer(self, frame: np.ndarray, frame_id: int = -1) -> InferenceResult:
         raise NotImplementedError
@@ -146,8 +143,8 @@ class YOLOInferenceEngine(BaseInferenceEngine):
 
     def __init__(self, config: dict):
         super().__init__(config)
-        inf_cfg = config.get("inference", {})
-        weights = inf_cfg.get("yolo_weights", "yolov8n.pt")
+        inf_cfg = config["inference"]
+        weights = inf_cfg["yolo_weights"]
         try:
             from ultralytics import YOLO
             self.model = YOLO(weights)
@@ -177,7 +174,7 @@ class YOLOInferenceEngine(BaseInferenceEngine):
 
 def create_engine(config: dict) -> BaseInferenceEngine:
     """工厂方法：根据配置创建推理引擎"""
-    model_type = config.get("inference", {}).get("model_type", "simulated")
+    model_type = config["inference"]["model_type"]
     if model_type == "yolo":
         return YOLOInferenceEngine(config)
     return SimulatedInferenceEngine(config)

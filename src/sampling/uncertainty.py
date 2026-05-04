@@ -29,14 +29,13 @@ class UncertaintySampler:
     """
 
     def __init__(self, config: dict):
-        samp_cfg = config.get("sampling", {})
-        self.conf_threshold = samp_cfg.get("confidence_threshold", 0.4)
-        self.iou_threshold = samp_cfg.get("bbox_jitter_iou_threshold", 0.5)
-        self.window_size = samp_cfg.get("jitter_window_size", 5)
-        self.jitter_ratio = samp_cfg.get("jitter_ratio_threshold", 0.6)
-        self.fusion = samp_cfg.get("fusion_strategy", "any")
-        # 历史最大保留帧数：超过此范围未出现的类别将被清理
-        self.history_max_age = samp_cfg.get("history_max_age", 500)
+        samp_cfg = config["sampling"]
+        self.conf_threshold = samp_cfg["confidence_threshold"]
+        self.iou_threshold = samp_cfg["bbox_jitter_iou_threshold"]
+        self.window_size = samp_cfg["jitter_window_size"]
+        self.jitter_ratio = samp_cfg["jitter_ratio_threshold"]
+        self.fusion = samp_cfg["fusion_strategy"]
+        self.history_max_age = samp_cfg["history_max_age"]
 
         # 滑动窗口缓存：class_name -> deque of (frame_id, bbox)
         self._history: dict[str, list[tuple[int, list]]] = defaultdict(list)
