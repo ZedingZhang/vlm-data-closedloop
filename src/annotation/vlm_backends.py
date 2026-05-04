@@ -9,14 +9,18 @@ VLM 推理后端
 
 import json
 import random
+import time
 import base64
 import re
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -214,6 +218,8 @@ class QwenVLBackend(VLMBackend):
         self.api_base = cfg.get("api_base", "http://localhost:8000/v1")
         self.model_name = cfg.get("model_name", "Qwen/Qwen2.5-VL-7B-Instruct")
         self.max_tokens = cfg.get("max_tokens", 1024)
+        self.max_retries = cfg.get("max_retries", 3)
+        self.retry_delay = cfg.get("retry_delay", 2.0)
         self._model = None
         self._processor = None
 
@@ -238,7 +244,7 @@ class QwenVLBackend(VLMBackend):
         return self._infer_api(image, prompt)
 
     def _infer_local(self, image: np.ndarray, prompt: dict) -> VLMResponse:
-        """本地 transformers 推理"""
+        """本地 transformers 推理（带重试）"""
         self._load_local_model()
         from qwen_vl_utils import process_vision_info
 
@@ -249,19 +255,49 @@ class QwenVLBackend(VLMBackend):
                 {"type": "text", "text": prompt["user"]},
             ]},
         ]
-        text = self._processor.apply_chat_template(messages, tokenize=False,
-                                                   add_generation_prompt=True)
-        image_inputs, video_inputs = process_vision_info(messages)
-        inputs = self._processor(text=[text], images=image_inputs, videos=video_inputs,
-                                 padding=True, return_tensors="pt").to(self._model.device)
-        output_ids = self._model.generate(**inputs, max_new_tokens=self.max_tokens)
-        trimmed = output_ids[0][len(inputs.input_ids[0]):]
-        raw_output = self._processor.decode(trimmed, skip_special_tokens=True)
-        return self._parse_response(raw_output, prompt)
+
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                text = self._processor.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
+                image_inputs, video_inputs = process_vision_info(messages)
+                inputs = self._processor(
+                    text=[text], images=image_inputs, videos=video_inputs,
+                    padding=True, return_tensors="pt",
+                ).to(self._model.device)
+                output_ids = self._model.generate(**inputs, max_new_tokens=self.max_tokens)
+                trimmed = output_ids[0][len(inputs.input_ids[0]):]
+                raw_output = self._processor.decode(trimmed, skip_special_tokens=True)
+                return self._parse_response(raw_output, prompt)
+            except RuntimeError as e:
+                # OOM / CUDA error 等
+                last_error = e
+                logger.warning("Qwen 本地推理失败 (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
+                if "out of memory" in str(e).lower():
+                    import torch
+                    torch.cuda.empty_cache()
+            except Exception as e:
+                last_error = e
+                logger.warning("Qwen 本地推理异常 (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
+
+            if attempt < self.max_retries - 1:
+                wait = self.retry_delay * (2 ** attempt)
+                time.sleep(wait)
+
+        logger.error("Qwen 本地推理最终失败 (%d 次重试后): %s", self.max_retries, last_error)
+        return VLMResponse(
+            detections=[],
+            raw_output="",
+            task_type=prompt.get("task_type", "detection"),
+            metadata={"error": str(last_error), "retries_exhausted": True},
+        )
 
     def _infer_api(self, image: np.ndarray, prompt: dict) -> VLMResponse:
-        """OpenAI 兼容 API 调用"""
+        """OpenAI 兼容 API 调用（带重试）"""
         import requests
+
         b64 = self._encode_image(image)
         payload = {
             "model": self.model_name,
@@ -274,10 +310,44 @@ class QwenVLBackend(VLMBackend):
             ],
             "max_tokens": self.max_tokens,
         }
-        resp = requests.post(f"{self.api_base}/chat/completions", json=payload, timeout=60)
-        resp.raise_for_status()
-        raw_output = resp.json()["choices"][0]["message"]["content"]
-        return self._parse_response(raw_output, prompt)
+
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = requests.post(
+                    f"{self.api_base}/chat/completions", json=payload, timeout=90
+                )
+                resp.raise_for_status()
+                raw_output = resp.json()["choices"][0]["message"]["content"]
+                return self._parse_response(raw_output, prompt)
+            except requests.Timeout as e:
+                last_error = e
+                logger.warning("Qwen API 超时 (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
+            except requests.ConnectionError as e:
+                last_error = e
+                logger.warning("Qwen API 连接失败 (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
+            except requests.HTTPError as e:
+                last_error = e
+                status = e.response.status_code if e.response is not None else "unknown"
+                logger.warning("Qwen API HTTP %s (attempt %d/%d): %s", status, attempt + 1, self.max_retries, e)
+                # 4xx 错误（除 429 外）不重试
+                if status != 429 and 400 <= (status if isinstance(status, int) else 0) < 500:
+                    break
+            except (KeyError, IndexError, json.JSONDecodeError) as e:
+                last_error = e
+                logger.warning("Qwen API 响应解析失败 (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
+
+            if attempt < self.max_retries - 1:
+                wait = self.retry_delay * (2 ** attempt)
+                time.sleep(wait)
+
+        logger.error("Qwen API 最终失败 (%d 次重试后): %s", self.max_retries, last_error)
+        return VLMResponse(
+            detections=[],
+            raw_output="",
+            task_type=prompt.get("task_type", "detection"),
+            metadata={"error": str(last_error), "retries_exhausted": True},
+        )
 
     def _parse_response(self, raw_output: str, prompt: dict) -> VLMResponse:
         """解析 VLM 文本输出为结构化结果"""
@@ -301,6 +371,8 @@ class GroundingDINOBackend(VLMBackend):
         self.model_path = cfg.get("model_path", "IDEA-Research/grounding-dino-base")
         self.box_threshold = cfg.get("box_threshold", 0.25)
         self.text_threshold = cfg.get("text_threshold", 0.20)
+        self.max_retries = cfg.get("max_retries", 3)
+        self.retry_delay = cfg.get("retry_delay", 2.0)
         self._model = None
 
     def _build_text_prompt(self, prompt: dict) -> str:
@@ -367,8 +439,9 @@ class GroundingDINOBackend(VLMBackend):
         )
 
     def _infer_api(self, image: np.ndarray, prompt: dict) -> VLMResponse:
-        """API 调用"""
+        """API 调用（带重试）"""
         import requests
+
         _, buf = cv2.imencode(".jpg", image)
         b64 = base64.b64encode(buf.tobytes()).decode("utf-8")
         text_prompt = self._build_text_prompt(prompt)
@@ -379,28 +452,58 @@ class GroundingDINOBackend(VLMBackend):
             "box_threshold": self.box_threshold,
             "text_threshold": self.text_threshold,
         }
-        resp = requests.post(self.api_url, json=payload, timeout=60)
-        resp.raise_for_status()
-        result = resp.json()
 
-        h, w = image.shape[:2]
-        detections = []
-        for item in result.get("detections", []):
-            bbox = item.get("bbox", [0, 0, 0, 0])
-            # 如果是归一化坐标则转换
-            if all(0 <= v <= 1.0 for v in bbox):
-                bbox = [int(bbox[0] * w), int(bbox[1] * h),
-                        int(bbox[2] * w), int(bbox[3] * h)]
-            detections.append(VLMDetection(
-                class_name=item.get("class", "unknown"),
-                bbox=bbox,
-                confidence=round(item.get("confidence", 0.5), 4),
-            ))
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = requests.post(self.api_url, json=payload, timeout=90)
+                resp.raise_for_status()
+                result = resp.json()
 
+                h, w = image.shape[:2]
+                detections = []
+                for item in result.get("detections", []):
+                    bbox = item.get("bbox", [0, 0, 0, 0])
+                    if all(0 <= v <= 1.0 for v in bbox):
+                        bbox = [int(bbox[0] * w), int(bbox[1] * h),
+                                int(bbox[2] * w), int(bbox[3] * h)]
+                    detections.append(VLMDetection(
+                        class_name=item.get("class", "unknown"),
+                        bbox=bbox,
+                        confidence=round(item.get("confidence", 0.5), 4),
+                    ))
+
+                return VLMResponse(
+                    detections=detections,
+                    raw_output=json.dumps(result),
+                    task_type="detection",
+                )
+            except requests.Timeout as e:
+                last_error = e
+                logger.warning("GroundingDINO API 超时 (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
+            except requests.ConnectionError as e:
+                last_error = e
+                logger.warning("GroundingDINO API 连接失败 (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
+            except requests.HTTPError as e:
+                last_error = e
+                status = e.response.status_code if e.response is not None else "unknown"
+                logger.warning("GroundingDINO API HTTP %s (attempt %d/%d): %s", status, attempt + 1, self.max_retries, e)
+                if status != 429 and 400 <= (status if isinstance(status, int) else 0) < 500:
+                    break
+            except (KeyError, json.JSONDecodeError) as e:
+                last_error = e
+                logger.warning("GroundingDINO API 响应解析失败 (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
+
+            if attempt < self.max_retries - 1:
+                wait = self.retry_delay * (2 ** attempt)
+                time.sleep(wait)
+
+        logger.error("GroundingDINO API 最终失败 (%d 次重试后): %s", self.max_retries, last_error)
         return VLMResponse(
-            detections=detections,
-            raw_output=json.dumps(result),
+            detections=[],
+            raw_output="",
             task_type="detection",
+            metadata={"error": str(last_error), "retries_exhausted": True},
         )
 
 
