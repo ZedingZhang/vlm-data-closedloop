@@ -80,7 +80,7 @@ class HardExampleStorage:
         # 保存图像
         reason_dir = os.path.join(self.output_dir, flag.reason)
         img_path = os.path.join(reason_dir, f"{base_name}.jpg")
-        cv2.imwrite(img_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        cv2.imwrite(img_path, frame, (cv2.IMWRITE_JPEG_QUALITY, 95))
 
         # 保存元数据
         if self.save_metadata:
