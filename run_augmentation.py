@@ -65,6 +65,7 @@ def run_augmentation(
     multiplier: int = 3,
     with_labels: bool = True,
     config_path: str = None,
+    force: bool = False,
 ):
     """执行批量数据增强
 
@@ -75,12 +76,12 @@ def run_augmentation(
         multiplier: 每张图像生成的增强副本数
         with_labels: 是否同时处理 YOLO 标注
         config_path: 配置文件路径
+        force: 如果为 True，即使增强副本已存在也重新生成
     """
     config = {}
     if config_path and os.path.isfile(config_path):
         config = load_config(config_path)
-
-    log_dir = config.get("storage", {}).get("log_dir", "data/logs")
+    log_dir = config.get("storage", {}).get("log_dir", "data/logs") if config else "data/logs"
     logger = setup_logger("augmentation", log_dir)
 
     logger.info("=" * 60)
@@ -91,6 +92,7 @@ def run_augmentation(
     logger.info(f"流水线: {pipeline_name}")
     logger.info(f"增强倍数: {multiplier}")
     logger.info(f"处理标注: {with_labels}")
+    logger.info(f"强制重新生成: {force}")
 
     # 收集图像
     exts = ("*.jpg", "*.jpeg", "*.png")
@@ -135,12 +137,34 @@ def run_augmentation(
     logger.info("-" * 60)
 
     total_generated = 0
+    skipped = 0
     t_start = time.time()
 
     for idx, img_path in enumerate(image_paths):
         fname = os.path.basename(img_path)
         name_no_ext = os.path.splitext(fname)[0]
         ext = os.path.splitext(fname)[1]
+
+        # 断点续跑：检查所有增强副本是否已存在
+        if not force:
+            all_exist = os.path.isfile(os.path.join(out_images, fname))
+            if all_exist:
+                for aug_idx in range(multiplier):
+                    aug_name = f"{name_no_ext}_aug{aug_idx}{ext}"
+                    if not os.path.isfile(os.path.join(out_images, aug_name)):
+                        all_exist = False
+                        break
+                    if with_labels and labels_dir:
+                        aug_label = f"{name_no_ext}_aug{aug_idx}.txt"
+                        if not os.path.isfile(os.path.join(out_labels, aug_label)):
+                            all_exist = False
+                            break
+            if all_exist:
+                skipped += 1
+                total_generated += 1 + multiplier  # 计入统计
+                if (idx + 1) % 50 == 0:
+                    logger.info(f"[进度] {idx + 1}/{len(image_paths)} | 跳过: {skipped}")
+                continue
 
         image = cv2.imread(img_path)
         if image is None:
@@ -200,7 +224,7 @@ def run_augmentation(
 
         if (idx + 1) % 30 == 0 or idx == len(image_paths) - 1:
             logger.info(f"[进度] {idx + 1}/{len(image_paths)} 图像处理完毕, "
-                        f"已生成 {total_generated} 样本")
+                        f"已生成 {total_generated} 样本, 跳过 {skipped}")
 
     elapsed = time.time() - t_start
 
@@ -214,6 +238,7 @@ def run_augmentation(
     logger.info(f"原始图像: {len(image_paths)}")
     logger.info(f"增强倍数: {multiplier}")
     logger.info(f"生成样本总数: {final_images} 张图像, {final_labels} 个标注")
+    logger.info(f"跳过(已完成): {skipped} 张原图")
     logger.info(f"扩增倍率: {final_images / max(len(image_paths), 1):.1f}x")
     logger.info(f"耗时: {elapsed:.2f}s")
     logger.info(f"输出路径: {os.path.abspath(output_dir)}")
@@ -268,6 +293,10 @@ def main():
         "--all-pipelines", action="store_true",
         help="对每种增强风格各生成一份"
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="强制重新生成所有增强副本（忽略已有输出）"
+    )
     args = parser.parse_args()
 
     default_input = os.path.join(PROJECT_ROOT, "data", "annotations", "yolo", "images")
@@ -276,7 +305,14 @@ def main():
     output_dir = args.output or default_output
 
     if args.all_pipelines:
-        run_all_pipelines(input_dir, output_dir, args.multiplier, args.config)
+        for name in ["night", "backlight", "shadow", "camera_degradation"]:
+            out_dir = os.path.join(output_dir, f"aug_{name}")
+            run_augmentation(
+                input_dir=input_dir, output_dir=out_dir,
+                pipeline_name=name, multiplier=args.multiplier,
+                with_labels=False, config_path=args.config,
+                force=args.force,
+            )
     else:
         run_augmentation(
             input_dir=input_dir,
@@ -285,6 +321,7 @@ def main():
             multiplier=args.multiplier,
             with_labels=not args.no_labels,
             config_path=args.config,
+            force=args.force,
         )
 
 
