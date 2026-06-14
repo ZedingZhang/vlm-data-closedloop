@@ -2,6 +2,17 @@
 
 面向自动驾驶座舱场景的 **VLM 数据闭环系统**，通过"模拟推流 → 模型推理 → 困难样本挖掘 → VLM 自动标注 → 数据增强"链路，自动发现并对长尾场景进行标注，持续扩充训练数据集。
 
+## 30-second verification
+
+快速确认核心工具函数、响应解析和不确定性采样逻辑：
+
+```bash
+git clone https://github.com/ZedingZhang/vlm-data-closedloop.git
+cd vlm-data-closedloop
+python -m pip install -r requirements.txt
+python -m pytest -q
+```
+
 ## 架构
 
 ```
